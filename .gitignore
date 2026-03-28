@@ -1,0 +1,34 @@
+/[Ll]ibrary/
+/[Tt]emp/
+/[Oo]bj/
+/[Bb]uild/
+/[Bb]uilds/
+/[Cc]logs/
+/[MemoryCaptures]/
+
+# 每台电脑自动生成的项目文件
+*.csproj
+*.unityproj
+*.sln
+*.suo
+*.tmp
+*.user
+*.userprefs
+*.pidb
+*.booproj
+*.svd
+*.pdb
+*.opendb
+*.VC.db
+
+# Unity3D 生成的元数据
+*.pidb.meta
+*.pdb.meta
+*.mdb.meta
+
+# 系统与日志
+sysinfo.txt
+*.log
+
+# 崩溃报告
+CrashReporter/
