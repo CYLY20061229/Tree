@@ -80,9 +80,10 @@ public class GameManager : MonoBehaviour
     readonly List<RespawnRequest> respawns = new List<RespawnRequest>();
     readonly List<TemporaryStone> temporaryStones = new List<TemporaryStone>();
 
-    SkillUnlockType pendingSkillUnlock = SkillUnlockType.None;
-    TurnPlayer pendingSkillPlayer = TurnPlayer.PlayerA;
-    SkillChoice[] pendingChoices = new SkillChoice[2];
+    SkillUnlockType pendingSkillUnlockA = SkillUnlockType.None;
+    SkillUnlockType pendingSkillUnlockB = SkillUnlockType.None;
+    SkillChoice[] pendingChoicesA = new SkillChoice[2];
+    SkillChoice[] pendingChoicesB = new SkillChoice[2];
     string winnerMessage = string.Empty;
     string battleMessage = string.Empty;
 
@@ -167,12 +168,11 @@ public class GameManager : MonoBehaviour
             }
         }
 
-        if (pendingSkillUnlock == SkillUnlockType.None)
-        {
-            EvaluateUltimateUnlockForPlayers();
-        }
+        EvaluateUltimateUnlockForPlayers();
+        TryQueueSkillUnlock(playerA);
+        TryQueueSkillUnlock(playerB);
 
-        if (pendingSkillUnlock != SkillUnlockType.None)
+        if (pendingSkillUnlockA != SkillUnlockType.None || pendingSkillUnlockB != SkillUnlockType.None)
         {
             HandleSkillInput();
         }
@@ -198,8 +198,10 @@ public class GameManager : MonoBehaviour
         ResetPlayerState(playerB);
         playerA.body.Add(new GridPos(2, 0));
         playerB.body.Add(new GridPos(gridManager.width - 3, 0));
-        pendingSkillUnlock = SkillUnlockType.None;
-        pendingChoices = new SkillChoice[2];
+        pendingSkillUnlockA = SkillUnlockType.None;
+        pendingSkillUnlockB = SkillUnlockType.None;
+        pendingChoicesA = new SkillChoice[2];
+        pendingChoicesB = new SkillChoice[2];
         battleMessage = "目标：率先到达最底层（双方可同时移动）";
         matchTimerRemaining = matchTimeLimitSeconds;
     }
@@ -615,6 +617,7 @@ public class GameManager : MonoBehaviour
             timer = resourceRespawnDelay,
             minRow = Mathf.Clamp(pos.y + 2, 2, gridManager.height - 2)
         });
+        TryQueueSkillUnlock(player);
     }
 
     void GiveResource(PlayerRoot player, CellType resourceType)
@@ -754,12 +757,13 @@ public class GameManager : MonoBehaviour
 
     void EvaluateUltimateUnlockForPlayers()
     {
-        if (TryTriggerUltimate(playerA, playerB))
-        {
-            return;
-        }
-
+        TryTriggerUltimate(playerA, playerB);
         TryTriggerUltimate(playerB, playerA);
+    }
+
+    void TryQueueSkillUnlock(PlayerRoot player)
+    {
+        EvaluateSkillUnlock(player);
     }
 
     bool TryTriggerUltimate(PlayerRoot current, PlayerRoot enemy)
@@ -779,17 +783,34 @@ public class GameManager : MonoBehaviour
             return false;
         }
 
-        pendingSkillUnlock = SkillUnlockType.Ultimate;
-        pendingSkillPlayer = current == playerA ? TurnPlayer.PlayerA : TurnPlayer.PlayerB;
-        pendingChoices[0] = new SkillChoice(SkillType.VacuumHarvest, "吸养", "以根尖为中心 5×5 内资源持续吸取，持续 4 秒");
-        pendingChoices[1] = new SkillChoice(SkillType.UltimateDrain, "资源掠夺", "偷取对方全部氮磷钾，对方膨压上限 50% 持续 5 秒");
+        bool isA = current == playerA;
+        SkillUnlockType pending = isA ? pendingSkillUnlockA : pendingSkillUnlockB;
+        if (pending != SkillUnlockType.None)
+        {
+            return false;
+        }
+
+        SkillChoice[] choices = isA ? pendingChoicesA : pendingChoicesB;
+        if (isA)
+        {
+            pendingSkillUnlockA = SkillUnlockType.Ultimate;
+        }
+        else
+        {
+            pendingSkillUnlockB = SkillUnlockType.Ultimate;
+        }
+
+        choices[0] = new SkillChoice(SkillType.VacuumHarvest, "吸养", "以根尖为中心 5×5 内资源持续吸取，持续 4 秒");
+        choices[1] = new SkillChoice(SkillType.UltimateDrain, "资源掠夺", "偷取对方全部氮磷钾，对方膨压上限 50% 持续 5 秒");
         battleMessage = current.playerName + " 落后 8 层以上，触发终极技能";
         return true;
     }
 
     void EvaluateSkillUnlock(PlayerRoot player)
     {
-        if (pendingSkillUnlock != SkillUnlockType.None)
+        bool isA = player == playerA;
+        SkillUnlockType pending = isA ? pendingSkillUnlockA : pendingSkillUnlockB;
+        if (pending != SkillUnlockType.None)
         {
             return;
         }
@@ -814,13 +835,21 @@ public class GameManager : MonoBehaviour
             return;
         }
 
-        pendingSkillUnlock = unlockType;
-        pendingSkillPlayer = player == playerA ? TurnPlayer.PlayerA : TurnPlayer.PlayerB;
-        PrepareSkillChoices(unlockType);
+        SkillChoice[] target = isA ? pendingChoicesA : pendingChoicesB;
+        if (isA)
+        {
+            pendingSkillUnlockA = unlockType;
+        }
+        else
+        {
+            pendingSkillUnlockB = unlockType;
+        }
+
+        PrepareSkillChoices(unlockType, target);
         battleMessage = player.playerName + " 解锁了技能选择";
     }
 
-    void PrepareSkillChoices(SkillUnlockType unlockType)
+    void PrepareSkillChoices(SkillUnlockType unlockType, SkillChoice[] pendingChoices)
     {
         if (unlockType == SkillUnlockType.NpkSet)
         {
@@ -852,7 +881,7 @@ public class GameManager : MonoBehaviour
 
         SkillChoice[] tripleEnemyPool =
         {
-            new SkillChoice(SkillType.Collapse, "塌方", "在敌方下方连续生成临时石头堵路"),
+            new SkillChoice(SkillType.Collapse, "塌方", "在敌方根尖下第二行水平连续生成 5 块临时石头"),
             new SkillChoice(SkillType.Interference, "干扰", "敌方 4 秒内无法使用技能且膨压条被隐藏"),
             new SkillChoice(SkillType.RootSnare, "根须绞杀", "敌方根尖沿原路径后退 2 格")
         };
@@ -863,53 +892,67 @@ public class GameManager : MonoBehaviour
 
     void HandleSkillInput()
     {
-        if (pendingSkillPlayer == TurnPlayer.PlayerA)
+        if (pendingSkillUnlockA != SkillUnlockType.None)
         {
             if (Input.GetKeyDown(KeyCode.Q))
             {
-                ChooseSkill(0);
+                ChooseSkill(TurnPlayer.PlayerA, 0);
             }
 
             if (Input.GetKeyDown(KeyCode.E))
             {
-                ChooseSkill(1);
+                ChooseSkill(TurnPlayer.PlayerA, 1);
+            }
+
+            if (Input.GetKeyDown(KeyCode.Alpha1))
+            {
+                ChooseSkill(TurnPlayer.PlayerA, 0);
+            }
+
+            if (Input.GetKeyDown(KeyCode.Alpha2))
+            {
+                ChooseSkill(TurnPlayer.PlayerA, 1);
             }
         }
-        else
+
+        if (pendingSkillUnlockB != SkillUnlockType.None)
         {
             if (Input.GetKeyDown(KeyCode.U))
             {
-                ChooseSkill(0);
+                ChooseSkill(TurnPlayer.PlayerB, 0);
             }
 
             if (Input.GetKeyDown(KeyCode.O))
             {
-                ChooseSkill(1);
+                ChooseSkill(TurnPlayer.PlayerB, 1);
             }
-        }
 
-        if (Input.GetKeyDown(KeyCode.Alpha1) || Input.GetKeyDown(KeyCode.Keypad1))
-        {
-            ChooseSkill(0);
-        }
+            if (Input.GetKeyDown(KeyCode.Keypad1))
+            {
+                ChooseSkill(TurnPlayer.PlayerB, 0);
+            }
 
-        if (Input.GetKeyDown(KeyCode.Alpha2) || Input.GetKeyDown(KeyCode.Keypad2))
-        {
-            ChooseSkill(1);
+            if (Input.GetKeyDown(KeyCode.Keypad2))
+            {
+                ChooseSkill(TurnPlayer.PlayerB, 1);
+            }
         }
     }
 
-    void ChooseSkill(int index)
+    void ChooseSkill(TurnPlayer who, int index)
     {
-        if (index < 0 || index >= pendingChoices.Length)
+        SkillUnlockType pendingUnlock = who == TurnPlayer.PlayerA ? pendingSkillUnlockA : pendingSkillUnlockB;
+        SkillChoice[] pendingChoices = who == TurnPlayer.PlayerA ? pendingChoicesA : pendingChoicesB;
+
+        if (index < 0 || index >= pendingChoices.Length || pendingUnlock == SkillUnlockType.None)
         {
             return;
         }
 
-        NormalizePendingChoices();
+        NormalizePendingChoices(pendingChoices);
 
-        PlayerRoot player = pendingSkillPlayer == TurnPlayer.PlayerA ? playerA : playerB;
-        PlayerRoot enemy = pendingSkillPlayer == TurnPlayer.PlayerA ? playerB : playerA;
+        PlayerRoot player = who == TurnPlayer.PlayerA ? playerA : playerB;
+        PlayerRoot enemy = who == TurnPlayer.PlayerA ? playerB : playerA;
 
         if (player.skillBlockTimer > 0f)
         {
@@ -918,21 +961,29 @@ public class GameManager : MonoBehaviour
         }
 
         SkillChoice choice = pendingChoices[index];
-        bool consumesResources = pendingSkillUnlock == SkillUnlockType.NpkSet || pendingSkillUnlock == SkillUnlockType.TripleResource;
+        bool consumesResources = pendingUnlock == SkillUnlockType.NpkSet || pendingUnlock == SkillUnlockType.TripleResource;
 
         if (consumesResources)
         {
-            ConsumeSkillCost(player, pendingSkillUnlock);
+            ConsumeSkillCost(player, pendingUnlock);
         }
 
         ApplySkill(choice.type, player, enemy);
 
-        if (pendingSkillUnlock == SkillUnlockType.Ultimate)
+        if (pendingUnlock == SkillUnlockType.Ultimate)
         {
             player.hasUsedUltimate = true;
         }
 
-        pendingSkillUnlock = SkillUnlockType.None;
+        if (who == TurnPlayer.PlayerA)
+        {
+            pendingSkillUnlockA = SkillUnlockType.None;
+        }
+        else
+        {
+            pendingSkillUnlockB = SkillUnlockType.None;
+        }
+
         pendingChoices[0] = new SkillChoice();
         pendingChoices[1] = new SkillChoice();
 
@@ -1205,28 +1256,27 @@ public class GameManager : MonoBehaviour
 
     int PlaceCollapseStones(PlayerRoot enemy)
     {
+        int rowY = enemy.Head.y + 2;
         int hx = enemy.Head.x;
-        int startY = enemy.Head.y + 1;
         int placed = 0;
-        int existing = 0;
 
-        for (int i = 0; i < 5 && startY + i < gridManager.height; i++)
+        if (rowY >= gridManager.height)
         {
-            GridPos check = new GridPos(hx, startY + i);
-            if (gridManager.IsInside(check) && gridManager.IsStone(check))
-            {
-                existing++;
-            }
+            return 0;
         }
 
-        int target = Mathf.Clamp(6 - existing, 0, 5);
-
-        for (int i = 0; i < 5 && placed < target; i++)
+        for (int k = -2; k <= 2; k++)
         {
-            GridPos pos = new GridPos(hx, startY + i);
+            int x = hx + k;
+            if (x < 0 || x >= gridManager.width)
+            {
+                continue;
+            }
+
+            GridPos pos = new GridPos(x, rowY);
             if (!gridManager.IsInside(pos))
             {
-                break;
+                continue;
             }
 
             if (gridManager.IsStone(pos))
@@ -1383,10 +1433,10 @@ public class GameManager : MonoBehaviour
 
         skillPanelLeft = CreateSkillSidePanel(canvasObj.transform, font, true, out skillTitleLeft, out skill1ButtonLeft, out skill2ButtonLeft, out skill1TextLeft, out skill2TextLeft);
         skillPanelRight = CreateSkillSidePanel(canvasObj.transform, font, false, out skillTitleRight, out skill1ButtonRight, out skill2ButtonRight, out skill1TextRight, out skill2TextRight);
-        skill1ButtonLeft.onClick.AddListener(() => ChooseSkill(0));
-        skill2ButtonLeft.onClick.AddListener(() => ChooseSkill(1));
-        skill1ButtonRight.onClick.AddListener(() => ChooseSkill(0));
-        skill2ButtonRight.onClick.AddListener(() => ChooseSkill(1));
+        skill1ButtonLeft.onClick.AddListener(() => ChooseSkill(TurnPlayer.PlayerA, 0));
+        skill2ButtonLeft.onClick.AddListener(() => ChooseSkill(TurnPlayer.PlayerA, 1));
+        skill1ButtonRight.onClick.AddListener(() => ChooseSkill(TurnPlayer.PlayerB, 0));
+        skill2ButtonRight.onClick.AddListener(() => ChooseSkill(TurnPlayer.PlayerB, 1));
 
         restartButton = MakeButton(canvasObj.transform, font, new Vector2(0f, 88f), new Vector2(260f, 74f), new Vector2(0.5f, 0.5f), out Text restartText);
         restartText.text = "重新开始";
@@ -1475,9 +1525,11 @@ public class GameManager : MonoBehaviour
 
     void SetTurgorBarFill(PlayerRoot player, RectTransform fillRt, Image fillImg)
     {
-        float maxT = Mathf.Max(0.001f, player.EffectiveMaxTurgor);
-        float pct = player.skillBlockTimer > 0f ? 0f : Mathf.Clamp01(player.turgor / maxT);
-        fillRt.SetSizeWithCurrentAnchors(RectTransform.Axis.Vertical, TurgorBarFillMaxHeight * pct);
+        // 膨压条总高度 = 槽位高度 × 当前精力值（0~max）；上限被减为 50% 时满条高度约为槽的一半
+        float fillH = player.skillBlockTimer > 0f
+            ? 0f
+            : TurgorBarFillMaxHeight * Mathf.Clamp01(player.turgor);
+        fillRt.SetSizeWithCurrentAnchors(RectTransform.Axis.Vertical, fillH);
         fillImg.color = player.skillBlockTimer > 0f
             ? new Color(0.42f, 0.44f, 0.48f, 0.82f)
             : TurgorBarFillBlue;
@@ -1638,7 +1690,7 @@ public class GameManager : MonoBehaviour
         {
             centerText.text = winnerMessage + "\n点击下方按钮重新开始";
         }
-        else if (pendingSkillUnlock != SkillUnlockType.None)
+        else if (pendingSkillUnlockA != SkillUnlockType.None || pendingSkillUnlockB != SkillUnlockType.None)
         {
             centerText.text = battleMessage + "\n（侧边选择技能，对战不暂停）";
         }
@@ -1656,32 +1708,33 @@ public class GameManager : MonoBehaviour
             centerText.text = nearEnd + "实时：A/S/D 与 J/K/L 可同时操作\n" + battleMessage;
         }
 
-        bool showSkill = pendingSkillUnlock != SkillUnlockType.None && !gameOver;
-        bool showLeftSkill = showSkill && pendingSkillPlayer == TurnPlayer.PlayerA;
-        bool showRightSkill = showSkill && pendingSkillPlayer == TurnPlayer.PlayerB;
+        bool showLeftSkill = pendingSkillUnlockA != SkillUnlockType.None && !gameOver;
+        bool showRightSkill = pendingSkillUnlockB != SkillUnlockType.None && !gameOver;
         skillPanelLeft.gameObject.SetActive(showLeftSkill);
         skillPanelRight.gameObject.SetActive(showRightSkill);
 
-        if (showSkill)
+        if (showLeftSkill)
         {
-            NormalizePendingChoices();
-            string title = GetUnlockTitle();
-            string line1 = "上：" + pendingChoices[0].title + "\n" + pendingChoices[0].description;
-            string line2 = "下：" + pendingChoices[1].title + "\n" + pendingChoices[1].description;
-            string keyHintLeft = "Q / E 或 1 / 2";
-            string keyHintRight = "U / O 或 1 / 2";
-            skillTitleLeft.text = title + "\n<color=#cccccc>" + keyHintLeft + "</color>";
-            skillTitleRight.text = title + "\n<color=#cccccc>" + keyHintRight + "</color>";
-            skill1TextLeft.text = line1;
-            skill2TextLeft.text = line2;
-            skill1TextRight.text = line1;
-            skill2TextRight.text = line2;
+            NormalizePendingChoices(pendingChoicesA);
+            string title = GetUnlockTitle(pendingSkillUnlockA);
+            skillTitleLeft.text = title + "\n<color=#cccccc>Q / E 或 1 / 2</color>";
+            skill1TextLeft.text = "上：" + pendingChoicesA[0].title + "\n" + pendingChoicesA[0].description;
+            skill2TextLeft.text = "下：" + pendingChoicesA[1].title + "\n" + pendingChoicesA[1].description;
+        }
+
+        if (showRightSkill)
+        {
+            NormalizePendingChoices(pendingChoicesB);
+            string title = GetUnlockTitle(pendingSkillUnlockB);
+            skillTitleRight.text = title + "\n<color=#cccccc>U / O 或小键盘 1 / 2</color>";
+            skill1TextRight.text = "上：" + pendingChoicesB[0].title + "\n" + pendingChoicesB[0].description;
+            skill2TextRight.text = "下：" + pendingChoicesB[1].title + "\n" + pendingChoicesB[1].description;
         }
 
         restartButton.gameObject.SetActive(gameOver);
     }
 
-    void NormalizePendingChoices()
+    void NormalizePendingChoices(SkillChoice[] pendingChoices)
     {
         for (int i = 0; i < pendingChoices.Length; i++)
         {
@@ -1714,14 +1767,14 @@ public class GameManager : MonoBehaviour
 
         if (skillPanelLeft != null)
         {
-            skillPanelLeft.transform.localScale = pendingSkillUnlock != SkillUnlockType.None && !gameOver && pendingSkillPlayer == TurnPlayer.PlayerA
+            skillPanelLeft.transform.localScale = pendingSkillUnlockA != SkillUnlockType.None && !gameOver
                 ? Vector3.one * Mathf.Lerp(0.985f, 1.025f, pulse)
                 : Vector3.one;
         }
 
         if (skillPanelRight != null)
         {
-            skillPanelRight.transform.localScale = pendingSkillUnlock != SkillUnlockType.None && !gameOver && pendingSkillPlayer == TurnPlayer.PlayerB
+            skillPanelRight.transform.localScale = pendingSkillUnlockB != SkillUnlockType.None && !gameOver
                 ? Vector3.one * Mathf.Lerp(0.985f, 1.025f, pulse)
                 : Vector3.one;
         }
@@ -1781,12 +1834,20 @@ public class GameManager : MonoBehaviour
             statuses.Add("冲石 " + player.breakStoneHits + "/3");
         }
 
+        if (player.ultimateTurgorPenaltyTimer > 0f && player.maxTurgorMultiplier < 0.999f)
+        {
+            statuses.Add("膨压上限 " + Mathf.RoundToInt(player.maxTurgorMultiplier * 100f) + "%（" + player.ultimateTurgorPenaltyTimer.ToString("0.0") + "s）");
+        }
+
         string statusText = statuses.Count > 0 ? string.Join("、", statuses.ToArray()) : "无";
 
         float maxT = Mathf.Max(0.01f, player.EffectiveMaxTurgor);
         string turgorLine = player.skillBlockTimer > 0f
             ? "膨压：???（干扰中）"
-            : "膨压：" + Mathf.RoundToInt(player.turgor / maxT * 100f) + "%";
+            : "膨压：" + Mathf.RoundToInt(player.turgor / maxT * 100f) + "%"
+                + (player.ultimateTurgorPenaltyTimer > 0f && player.maxTurgorMultiplier < 0.999f
+                    ? "（上限 " + Mathf.RoundToInt(player.maxTurgorMultiplier * 100f) + "%）"
+                    : string.Empty);
 
         return player.playerName
             + "\n深度：" + (player.Head.y + 1)
@@ -1798,19 +1859,19 @@ public class GameManager : MonoBehaviour
             + "\n状态：" + statusText;
     }
 
-    string GetUnlockTitle()
+    string GetUnlockTitle(SkillUnlockType unlock)
     {
-        if (pendingSkillUnlock == SkillUnlockType.NpkSet)
+        if (unlock == SkillUnlockType.NpkSet)
         {
             return "已解锁：氮 + 磷 + 钾 套装";
         }
 
-        if (pendingSkillUnlock == SkillUnlockType.TripleResource)
+        if (unlock == SkillUnlockType.TripleResource)
         {
             return "已解锁：同种资源 3 个";
         }
 
-        if (pendingSkillUnlock == SkillUnlockType.Ultimate)
+        if (unlock == SkillUnlockType.Ultimate)
         {
             return "已解锁：终极技能";
         }
@@ -1822,8 +1883,10 @@ public class GameManager : MonoBehaviour
     {
         respawns.Clear();
         temporaryStones.Clear();
-        pendingSkillUnlock = SkillUnlockType.None;
-        pendingChoices = new SkillChoice[2];
+        pendingSkillUnlockA = SkillUnlockType.None;
+        pendingSkillUnlockB = SkillUnlockType.None;
+        pendingChoicesA = new SkillChoice[2];
+        pendingChoicesB = new SkillChoice[2];
         gameOver = false;
         winnerMessage = string.Empty;
         battleMessage = "目标：率先到达最底层（双方可同时移动）";
